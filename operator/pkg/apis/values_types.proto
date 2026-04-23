@@ -150,6 +150,8 @@ message CNIConfig {
   google.protobuf.BoolValue istioOwnedCNIConfig = 35;
   
   string istioOwnedCNIConfigFileName = 36;
+
+  MonitorConfig podMonitor = 37;
 }
 
 message CNIUsageConfig {
@@ -1000,6 +1002,8 @@ message PilotConfig {
 
   // Select a custom name for istiod's plugged-in CA CRL ConfigMap.
   string crlConfigMapName = 63;
+
+  MonitorConfig serviceMonitor = 64;
 }
 
 message PilotTaintControllerConfig {
@@ -1518,4 +1522,12 @@ message WaypointConfig {
 message NetworkPolicyConfig {
   // Controls whether default NetworkPolicy resources will be created.
   google.protobuf.BoolValue enabled = 1;
+}
+
+message MonitorConfig {
+  // Controls whether monitor is enabled
+  google.protobuf.BoolValue enabled = 1;
+
+  // Defines scrape interval for metrics
+  string interval = 2;
 }
