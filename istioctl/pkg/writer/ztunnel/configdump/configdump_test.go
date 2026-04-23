@@ -16,6 +16,7 @@ package configdump
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -72,7 +73,10 @@ func TestConfigWriter_PrintSummary(t *testing.T) {
 		wantOutputPolicies       string
 		wantOutputAll            string
 		wantOutputConn           string
+		wantOutputConnDump       string
 		configNamespace          string
+		workloadName             string
+		connWorkload             string
 		wantOutputAllwithHeaders string
 	}{
 		{
@@ -89,12 +93,33 @@ func TestConfigWriter_PrintSummary(t *testing.T) {
 			wantOutputWorkload: "testdata/workloadsummary_default.txt",
 		},
 		{
+			name:               "filtered workload by name",
+			workloadName:       "productpage-v1-675fc69cf-jscn2",
+			configNamespace:    "bookinfo",
+			wantOutputWorkload: "testdata/workloadsummary_workload.txt",
+		},
+		{
 			name:               "policies",
 			wantOutputPolicies: "testdata/policies.txt",
 		},
 		{
 			name:           "connections",
 			wantOutputConn: "testdata/connectionsummary.txt",
+		},
+		{
+			name:           "filtered connections by workload name.namespace",
+			connWorkload:   "productpage-v1-796f87b58-97bjk.bookinfo",
+			wantOutputConn: "testdata/connectionsummary_workload.txt",
+		},
+		{
+			name:            "filtered connections by workload and namespace",
+			connWorkload:    "productpage-v1-796f87b58-97bjk",
+			configNamespace: "bookinfo",
+			wantOutputConn:  "testdata/connectionsummary_workload.txt",
+		},
+		{
+			name:               "connections dump",
+			wantOutputConnDump: "testdata/connectionsdump.json",
 		},
 		{
 			name:          "all",
@@ -116,7 +141,7 @@ func TestConfigWriter_PrintSummary(t *testing.T) {
 				util.CompareContent(t, gotOut.Bytes(), tt.wantOutputSecret)
 			}
 			if tt.wantOutputWorkload != "" {
-				wf := WorkloadFilter{Namespace: tt.configNamespace}
+				wf := WorkloadFilter{Namespace: tt.configNamespace, Name: tt.workloadName}
 				assert.NoError(t, cw.PrintWorkloadSummary(wf))
 				util.CompareContent(t, gotOut.Bytes(), tt.wantOutputWorkload)
 			}
@@ -133,9 +158,61 @@ func TestConfigWriter_PrintSummary(t *testing.T) {
 				util.CompareContent(t, gotOut.Bytes(), tt.wantOutputAllwithHeaders)
 			}
 			if tt.wantOutputConn != "" {
-				assert.NoError(t, cw.PrintConnectionsSummary(ConnectionsFilter{}))
+				assert.NoError(t, cw.PrintConnectionsSummary(ConnectionsFilter{Workload: tt.connWorkload, Namespace: tt.configNamespace}))
 				util.CompareContent(t, gotOut.Bytes(), tt.wantOutputConn)
+			}
+			if tt.wantOutputConnDump != "" {
+				assert.NoError(t, cw.PrintConnectionsDump(ConnectionsFilter{}, "json"))
+				util.CompareContent(t, gotOut.Bytes(), tt.wantOutputConnDump)
 			}
 		})
 	}
+}
+
+func TestConfigWriter_PrintServiceDumpPreservesCanonical(t *testing.T) {
+	configDump := []byte(`{
+		"services": {
+			"/10.0.0.1": {
+				"name": "svc",
+				"namespace": "ns",
+				"hostname": "svc.ns.svc.cluster.local",
+				"vips": [
+					"/10.0.0.1"
+				],
+				"ports": {
+					"80": 8080
+				},
+				"endpoints": {},
+				"subjectAltNames": [],
+				"canonical": true
+			}
+		},
+		"workloads": {},
+		"policies": {},
+		"certificates": {}
+	}`)
+
+	want := []*ZtunnelService{
+		{
+			Name:            "svc",
+			Namespace:       "ns",
+			Hostname:        "svc.ns.svc.cluster.local",
+			Addresses:       []string{"/10.0.0.1"},
+			Ports:           map[string]int{"80": 8080},
+			Endpoints:       map[string]*ZtunnelEndpoint{},
+			SubjectAltNames: []string{},
+			Canonical:       true,
+		},
+	}
+
+	gotOut := &bytes.Buffer{}
+	cw := &ConfigWriter{Stdout: gotOut}
+	assert.NoError(t, cw.Prime(configDump))
+
+	assert.Equal(t, want, cw.ztunnelDump.Services)
+	assert.NoError(t, cw.PrintServiceDump(ServiceFilter{}, "json"))
+
+	var got []*ZtunnelService
+	assert.NoError(t, json.Unmarshal(gotOut.Bytes(), &got))
+	assert.Equal(t, want, got)
 }
